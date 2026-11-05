@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"test/config"
@@ -29,7 +30,8 @@ func main() {
 	fmt.Printf("🚀 Server started on http://localhost:%s\n", helper.ENV("APP_PORT"))
 
 	if err := http.ListenAndServe(":"+helper.ENV("APP_PORT"), router); err != nil {
-		panic(err)
+
+		log.Fatal(err)
 	}
 }
 
