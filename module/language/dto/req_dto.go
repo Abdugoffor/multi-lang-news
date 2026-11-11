@@ -1,7 +1,13 @@
 package lang_dto
 
+const (
+	StatusPlanned = "planned"
+	DirectionNext = "next"
+	DirectionPrev = "prev"
+)
+
 type Create struct {
-	Name     string `json:"name" validate:"required min=2,max=10"`
+	Name     string `json:"name" validate:"required,min=2,max=10"`
 	IsActive bool   `json:"is_active"`
 }
 

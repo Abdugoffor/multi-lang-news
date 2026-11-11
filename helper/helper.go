@@ -2,15 +2,19 @@ package helper
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
+	"github.com/julienschmidt/httprouter"
 )
 
 var validate = func() *validator.Validate {
@@ -41,6 +45,37 @@ func JSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
+}
+
+func DecodeJSON(w http.ResponseWriter, r *http.Request, data any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	decoder := json.NewDecoder(r.Body)
+
+	decoder.DisallowUnknownFields()
+	{
+		if err := decoder.Decode(data); err != nil {
+			return errors.New("invalid JSON body")
+		}
+
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return errors.New("body must contain a single JSON object")
+		}
+	}
+
+	return nil
+}
+
+func ParseID(w http.ResponseWriter, params httprouter.Params) (int64, bool) {
+	id, err := strconv.ParseInt(params.ByName("id"), 10, 64)
+	{
+		if err != nil || id < 1 {
+			JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+			return 0, false
+		}
+	}
+
+	return id, true
 }
 
 func Validate(v any) map[string]string {
