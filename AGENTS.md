@@ -1,6 +1,6 @@
 # Loyiha arxitekturasi va kod yozish qoidalari
 
-Ushbu qoidalar butun loyihaga, mavjud va yangi modullarga tegishli. Kod yozishdan oldin ushbu faylni, o'zgartiriladigan modulni va ishlatiladigan mavjud funksiyalarni o'qing. Arxitektura, nomlash, qavslar va mantiqiy bloklar uchun asosiy namuna — `module/tournament`.
+Ushbu qoidalar butun loyihaga, mavjud va yangi modullarga tegishli. Kod yozishdan oldin ushbu faylni, o'zgartiriladigan modulni va ishlatiladigan mavjud funksiyalarni o'qing. Arxitektura, nomlash, qavslar va mantiqiy bloklar uchun amaldagi namunalar — `module/news` va `module/category`. Foydalanuvchi ushbu modullarda qo'lda joylashtirgan mustaqil `{ ... }` bloklar keyingi o'zgarishlarda ham saqlanadi.
 
 ## 1. Barcha amallar uchun majburiy arxitektura
 
@@ -104,11 +104,13 @@ Oddiy delegatsiyada to'g'ridan-to'g'ri `return service.repository.Show(ctx, id)`
 
 ## 5. Qavslarni ochish, yopish va bloklarga olish
 
-Qavslar va mantiqiy bloklar uslubiga har bir o'zgarishda amal qiling. Asosiy namunalar:
+Qavslar va mantiqiy bloklar uslubiga har bir o'zgarishda amal qiling. Foydalanuvchi tahrirlagan amaldagi asosiy namunalar:
 
-- `module/tournament/handler/tournament_handler.go`
-- `module/tournament/service/tournament_service.go`
-- `module/tournament/repository/tournament_repository.go`
+- `module/news/handler/news_handler.go`
+- `module/news/service/news_service.go`
+- `module/news/repository/news_repository.go`
+
+Qo'shimcha namunalar — `module/category` va `module/language`ning tegishli qatlamlari. Loyihada mavjud bo'lmagan `module/tournament` fayllarini qavslar uslubi uchun manba sifatida qidirmang. Quyidagi qoidalar yangi kodga ham, mavjud kodni o'zgartirishga ham tegishli; vazifaga aloqasiz kodni bir xil ko'rinishga keltirish uchun qayta yozmang.
 
 ### Umumiy qavs qoidalari
 
@@ -120,14 +122,17 @@ Qavslar va mantiqiy bloklar uslubiga har bir o'zgarishda amal qiling. Asosiy nam
 - Mantiqiy bosqichlarni bo'sh qator bilan ajrating. Xato aniqlanganda erta `return` qiling.
 - Mavjud mustaqil bloklarni faqat kodni qisqartirish uchun olib tashlamang.
 - Har bir satr yoki har bir `if` uchun sun'iy blok yaratmang. Requestni tayyorlash, chaqiruv natijasini tekshirish va route'larni guruhlash kabi mantiqiy bosqichlarni blokka oling.
+- Deklaratsiya yoki chaqiruvdan keyingi mustaqil blok darhol keyingi satrda ochiladi; ular orasiga bo'sh qator qo'ymang. Blok yopilgach, keyingi mantiqiy bosqichdan oldin bo'sh qator qoldiring.
+- Chaqiruv natijasi keyin ishlatilsa, uni blokdan oldin e'lon qiling. Blok natijani va xatoni tekshirish uchun xizmat qiladi; natija blok ichida ko'rinmay qolmasin.
+- Foydalanuvchi qo'shgan mustaqil bloklarni "ortiqcha qavs" deb olib tashlamang yoki `if err := ...; err != nil` ko'rinishiga qisqartirmang. `gofmt` indentatsiyani to'g'rilaydi, ushbu bloklarni qo'lda olib tashlash uchun sabab bo'lmaydi.
 
 ### Handlerda request va service natijasi
 
 Request deklaratsiyasidan keyin parse qilishni, service chaqiruvidan keyin xatoni tekshirishni alohida blokka oling:
 
 ```go
-func (handler *tournamentHandler) Create(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var req tournament_dto.Create
+func (handler *newsHandler) Create(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var req news_dto.Create
 	{
 		if !parseBody(w, r, &req) {
 			return
@@ -159,7 +164,7 @@ id, ok := helper.ParseID(w, params)
 
 ### Serviceda chaqiruv natijasini tekshirish
 
-Repository yoki boshqa service chaqiruvidan keyingi tekshiruvni shu uslubda yozing:
+Repository yoki boshqa service chaqiruvidan keyingi tekshiruvni shu uslubda yozing. Bu natija `:=` bilan e'lon qilinganda ham, oldindan mavjud o'zgaruvchiga `=` bilan yozilganda ham amal qiladi:
 
 ```go
 rows, err := service.repository.List(ctx, filter)
@@ -170,11 +175,11 @@ rows, err := service.repository.List(ctx, filter)
 }
 ```
 
-Oddiy biznes sharti uchun `tournament`dagi kabi bevosita `if` yetarli:
+Oddiy biznes sharti uchun bevosita `if` yetarli:
 
 ```go
-if !req.EndsAt.After(req.StartsAt) {
-	return nil, ErrInvalidDates
+if len(translations) != len(languages) {
+	return nil, ErrInvalidTranslation
 }
 
 return service.repository.Create(ctx, req)
@@ -182,24 +187,98 @@ return service.repository.Create(ctx, req)
 
 Natija tashqarida kerak bo'lsa, o'zgaruvchini tekshiruv blokidan oldin e'lon qiling. Blok ichida `:=` bilan tashqi `err` yoki natijani tasodifan soyada qoldirmang.
 
-### Repositoryda SQL va xato tekshiruvi
-
-SQL chaqiruvidan keyingi `if err != nil`ni qo'shimcha mustaqil `{ ... }` blokka o'ramang. `Scan` maydonlarini metod ichida aniq ko'rsating:
+Faqat xato qaytaradigan ichki tekshiruvlar va validatsiyalar uchun mavjud ixcham `if` uslubi ham saqlanadi. Masalan, `NewsService.Create` va `Update`dagi `prepare` chaqiruvi:
 
 ```go
-var res tournament_dto.Response
+if err := service.prepare(ctx, req); err != nil {
+	return nil, err
+}
+
+res, err := service.repository.Create(ctx, req)
+{
+	if err != nil {
+		return nil, serviceError(err)
+	}
+}
+```
+
+Bir chaqiruv xatosi uchun bir nechta tekshiruv kerak bo'lsa, ularning barchasi o'sha tekshiruv blokida bo'ladi. Masalan, `service.category.Show`dan keyin avval `errors.Is(err, pgx.ErrNoRows)`, so'ng qolgan `err != nil` tekshiriladi.
+
+### Repositoryda SQL va xato tekshiruvi
+
+Repositoryda ham mustaqil tekshiruv bloklari ishlatiladi. "SQLdan keyin alohida blok bo'lmaydi" degan umumiy cheklov yo'q. Qisqa chaqiruv va uning natijasini tekshirish uchun quyidagi uslubdan foydalaning; mavjud bloklarni saqlang:
+
+```go
+rows, err := repository.db.Query(ctx, query, args...)
+{
+	if err != nil {
+		return nil, err
+	}
+}
+
+defer rows.Close()
+```
+
+Shu uslub `HasMore`dagi qisqa `QueryRow(...).Scan(...)` va `Delete`dagi `Exec` natijalariga ham tegishli:
+
+```go
+err := repository.db.QueryRow(ctx, query, args...).Scan(&exists)
+{
+	if err != nil {
+		return false, err
+	}
+}
+```
+
+```go
+result, err := tx.Exec(ctx, "DELETE FROM news WHERE id = $1", id)
+{
+	if err != nil {
+		return err
+	}
+}
+
+if result.RowsAffected() == 0 {
+	return pgx.ErrNoRows
+}
+```
+
+`json.Marshal` va tranzaksiyani ochishdan keyingi xato tekshiruvlari ham alohida blokda yoziladi:
+
+```go
+translations, err := json.Marshal(req.Translations)
+{
+	if err != nil {
+		return nil, err
+	}
+}
+
+tx, err := repository.db.Begin(ctx)
+{
+	if err != nil {
+		return nil, err
+	}
+}
+
+defer tx.Rollback(context.WithoutCancel(ctx))
+```
+
+Ko'p qatorli SQL va `Scan`dan keyin amaldagi `Show`, `Create`, `Update` metodlaridagi kabi bevosita `if err != nil` yozish mumkin. Har bir SQL yoki har bir `Scan`ni majburan qo'shimcha blokka o'ramang. `Scan` maydonlarini metod ichida aniq ko'rsating:
+
+```go
+var res news_dto.Response
 
 err := repository.db.QueryRow(ctx, `
-	SELECT id, name, description, location, starts_at, ends_at, status, created_at, updated_at
-	FROM tournaments WHERE id = $1
+	SELECT id, is_main, is_active, view_count, photo, video, user_id, created_at, updated_at
+	FROM news WHERE id = $1
 `, id).Scan(
 	&res.ID,
-	&res.Name,
-	&res.Description,
-	&res.Location,
-	&res.StartsAt,
-	&res.EndsAt,
-	&res.Status,
+	&res.IsMain,
+	&res.IsActive,
+	&res.ViewCount,
+	&res.Photo,
+	&res.Video,
+	&res.UserID,
 	&res.CreatedAt,
 	&res.UpdatedAt,
 )
@@ -211,18 +290,32 @@ if err != nil {
 return &res, nil
 ```
 
+`rows.Err()` va `tx.Commit(ctx)` kabi faqat xato tekshiriladigan chaqiruvlarning mavjud ixcham shakli saqlanadi:
+
+```go
+if err := rows.Err(); err != nil {
+	return nil, err
+}
+
+if err := tx.Commit(ctx); err != nil {
+	return nil, err
+}
+```
+
+Bir metoddagi barcha `if err != nil`larni mexanik ravishda bir xil ko'rinishga o'tkazmang. O'zgartirilayotgan mantiqiy bosqichning mavjud uslubi va yuqoridagi qisqa/ko'p qatorli chaqiruv namunalariga amal qiling.
+
 ### Route'larni blokka olish
 
 Umumiy prefiksdan keyin modul route'larini bitta mantiqiy blokda yozing:
 
 ```go
-routes := group + "/tournaments"
+routes := group + "/news"
 {
-	router.POST(routes, auth_handler.RequireAuth(auth, handler.Create, roles...))
-	router.GET(routes, auth_handler.RequireAuth(auth, handler.List))
-	router.GET(routes+"/:id", auth_handler.RequireAuth(auth, handler.Show))
-	router.PUT(routes+"/:id", auth_handler.RequireAuth(auth, handler.Update, roles...))
-	router.DELETE(routes+"/:id", auth_handler.RequireAuth(auth, handler.Delete, roles...))
+	router.POST(routes, handler.Create)
+	router.GET(routes, handler.List)
+	router.GET(routes+"/:id", handler.Show)
+	router.PUT(routes+"/:id", handler.Update)
+	router.DELETE(routes+"/:id", handler.Delete)
 }
 ```
 
@@ -301,7 +394,7 @@ Bu bo'lim mavjud imkoniyatlarni o'zgartirishdan oldin tekshirish uchun qisqa xar
 
 1. Har bir yangi amal `handler -> service -> repository` chegaralariga mosligini tekshiring. Ma'lumot saqlash kerak bo'lmagan amalda bo'sh repository yaratmang.
 2. O'zgargan route, handler, service, repository interface/implementatsiyasi, DTO va migratsiyalar o'zaro mosligini tekshiring.
-3. Qavslarning ochilishi/yopilishi, mustaqil bloklar, o'zgaruvchilar ko'rinish doirasi va erta `return`larni ko'rib chiqing.
+3. Qavslarning ochilishi/yopilishi, mustaqil bloklar, o'zgaruvchilar ko'rinish doirasi va erta `return`larni ko'rib chiqing. Handler/service bilan birga repositorydagi qisqa chaqiruvlarning tekshiruv bloklari ham saqlanganini tekshiring; faqat kodni qisqartirish uchun foydalanuvchi qo'ygan bloklarni olib tashlamang.
 4. O'zgargan Go fayllariga `gofmt -w <fayllar>` ishlating.
 5. Go kodi o'zgarsa, `go build ./...` va `go vet ./...`ni bajaring. Zarur bo'lsa amaldagi xulqni ham tekshiring. Faqat hujjat o'zgarsa, Go tekshiruvlarini qayta ishga tushirish shart emas.
 6. Loyihada test fayllarini qoldirmang. Odatda yangi test faylisiz tekshiring; vaqtinchalik test zarur bo'lsa, tekshiruvdan so'ng o'zingiz yaratgan faylni olib tashlang.

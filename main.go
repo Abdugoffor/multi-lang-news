@@ -9,6 +9,7 @@ import (
 	"test/helper"
 	category_cmd "test/module/category"
 	language_cmd "test/module/language"
+	news_cmd "test/module/news"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -26,9 +27,8 @@ func main() {
 	{
 		language_cmd.Cmd(router, "/api", db)
 		category_cmd.Cmd(router, "/api", db)
+		news_cmd.Cmd(router, "/api", db)
 		// auth_cmd.Register(router, "/api", db)
-		// category_cmd.Register(router, "/api", db)
-		// hudud_cmd.Register(router, "/api", db)
 	}
 
 	fmt.Printf("🚀 Server started on http://localhost:%s\n", helper.ENV("APP_PORT"))
