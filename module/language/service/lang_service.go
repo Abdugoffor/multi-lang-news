@@ -3,7 +3,9 @@ package lang_service
 import (
 	"context"
 	"errors"
+	"log"
 	"slices"
+	"time"
 
 	lang_dto "test/module/language/dto"
 	lang_repository "test/module/language/repository"
@@ -41,6 +43,8 @@ func (service *LangService) Create(ctx context.Context, req *lang_dto.Create) (*
 			return nil, serviceError(err)
 		}
 	}
+
+	service.refreshActive(ctx)
 
 	return res, nil
 }
@@ -154,11 +158,48 @@ func (service *LangService) Update(ctx context.Context, id int64, req *lang_dto.
 		}
 	}
 
+	service.refreshActive(ctx)
+
 	return res, nil
 }
 
 func (service *LangService) Delete(ctx context.Context, id int64) error {
-	return serviceError(service.repository.Delete(ctx, id))
+	err := service.repository.Delete(ctx, id)
+	{
+		if err != nil {
+			return serviceError(err)
+		}
+	}
+
+	service.refreshActive(ctx)
+
+	return nil
+}
+
+func (service *LangService) refreshActive(ctx context.Context) {
+	// PostgreSQL has already committed; finish cache maintenance after request cancellation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+
+	invalidated, err := service.repository.InvalidateActive(ctx)
+	{
+		if err != nil {
+			log.Printf("Invalidate active languages cache: %v", err)
+			return
+		}
+	}
+
+	if !invalidated {
+		return
+	}
+
+	_, err = service.ListActive(ctx)
+	{
+		if err != nil {
+			log.Printf("Reload active languages cache: %v", err)
+			return
+		}
+	}
 }
 
 func serviceError(err error) error {

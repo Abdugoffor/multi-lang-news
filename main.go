@@ -23,6 +23,9 @@ func main() {
 
 	defer db.Close()
 
+	redis := config.RedisConnect()
+	defer redis.Close()
+
 	router := httprouter.New()
 	{
 		language_cmd.Cmd(router, "/api", db)

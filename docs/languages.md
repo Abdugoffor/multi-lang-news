@@ -17,6 +17,8 @@ Repositoryning `HasMore(ctx, filter, cursor, direction)` metodi qarama-qarshi yo
 
 Aktiv tillar route'i `/:id` bilan to'qnashmasligi uchun `/api/languages-active` manzilida joylashgan. Natija `id DESC` tartibidagi JSON massiv; til bo'lmasa `[]`.
 
+`LangService.ListActive` mavjud `lang_repo.go`dagi `ListActive(ctx)`ni chaqiradi. Repository shu metodning o'zida avval Redisni tekshiradi; kesh bo'lmasa, PostgreSQLdan o'qib 60 soniyaga saqlaydi. Muvaffaqiyatli til yaratish, yangilash yoki o'chirishdan so'ng faol tillar keshi darhol qayta yuklanadi. Shu service metodidan foydalanuvchi news va category tekshiruvlari ham keshni ishlatadi. Redis ishlamasa, PostgreSQLdan o'qiladi; DBga muvaffaqiyatli yozilgan amal kesh xatosi sababli xato javob qaytarmaydi. Uzilishda eskirgan kesh TTL tugaguncha qolishi mumkin. Sozlash, parallel yozuvlardan himoya va ishlash chegaralari: [PgBouncer va Redis](infrastructure.md).
+
 Create va Update uchun body:
 
 ```json

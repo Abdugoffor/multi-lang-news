@@ -2,18 +2,25 @@ package lang_repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
+	"test/config"
+	"test/helper"
 	lang_dto "test/module/language/dto"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type LangRepository interface {
 	List(ctx context.Context, filter *lang_dto.Filter) ([]lang_dto.Response, error)
 	HasMore(ctx context.Context, filter *lang_dto.Filter, cursor int64, direction string) (bool, error)
 	ListActive(ctx context.Context) ([]*lang_dto.Response, error)
+	InvalidateActive(ctx context.Context) (bool, error)
 	Show(ctx context.Context, id int64) (*lang_dto.Response, error)
 	Create(ctx context.Context, req *lang_dto.Create) (*lang_dto.Response, error)
 	Update(ctx context.Context, id int64, req *lang_dto.Update) (*lang_dto.Response, error)
@@ -21,11 +28,21 @@ type LangRepository interface {
 }
 
 type langRepository struct {
-	db *pgxpool.Pool
+	db         *pgxpool.Pool
+	cache      *redis.Client
+	activeKey  string
+	versionKey string
 }
 
 func NewLangRepository(db *pgxpool.Pool) LangRepository {
-	return &langRepository{db: db}
+	namespace := "test:" + helper.ENV("DB_NAME") + ":{languages}:"
+
+	return &langRepository{
+		db:         db,
+		cache:      config.Redis,
+		activeKey:  namespace + "active",
+		versionKey: namespace + "version",
+	}
 }
 
 func (repository *langRepository) List(ctx context.Context, filter *lang_dto.Filter) ([]lang_dto.Response, error) {
@@ -144,6 +161,35 @@ func (repository *langRepository) HasMore(ctx context.Context, filter *lang_dto.
 }
 
 func (repository *langRepository) ListActive(ctx context.Context) ([]*lang_dto.Response, error) {
+	version := "0"
+	cacheAvailable := false
+
+	if repository.cache != nil {
+		values, err := repository.cache.MGet(ctx, repository.versionKey, repository.activeKey).Result()
+		{
+			if err != nil {
+				log.Printf("Read active languages cache: %v", err)
+			} else {
+				cacheAvailable = true
+
+				if values[0] != nil {
+					version = values[0].(string)
+				}
+
+				if values[1] != nil {
+					var languages []*lang_dto.Response
+					{
+						if err := json.Unmarshal([]byte(values[1].(string)), &languages); err != nil {
+							log.Printf("Decode active languages cache: %v", err)
+						} else if languages != nil {
+							return languages, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
 	rows, err := repository.db.Query(ctx, `
 		SELECT id, name, is_active, created_at, updated_at
 		FROM languages
@@ -181,7 +227,50 @@ func (repository *langRepository) ListActive(ctx context.Context) ([]*lang_dto.R
 		return nil, err
 	}
 
+	if cacheAvailable {
+		data, err := json.Marshal(result)
+		{
+			if err != nil {
+				log.Printf("Encode active languages cache: %v", err)
+				return result, nil
+			}
+		}
+
+		// Reject a fill started before a concurrent language mutation.
+		err = repository.cache.Eval(ctx, `
+			if (redis.call('GET', KEYS[1]) or '0') ~= ARGV[1] then
+				return 0
+			end
+			redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
+			return 1
+		`, []string{repository.versionKey, repository.activeKey}, version, data, time.Minute.Milliseconds()).Err()
+		{
+			if err != nil {
+				log.Printf("Store active languages cache: %v", err)
+			}
+		}
+	}
+
 	return result, nil
+}
+
+func (repository *langRepository) InvalidateActive(ctx context.Context) (bool, error) {
+	if repository.cache == nil {
+		return false, nil
+	}
+
+	err := repository.cache.Eval(ctx, `
+		redis.call('INCR', KEYS[1])
+		redis.call('DEL', KEYS[2])
+		return 1
+	`, []string{repository.versionKey, repository.activeKey}).Err()
+	{
+		if err != nil {
+			return false, err
+		}
+	}
+
+	return true, nil
 }
 
 func (repository *langRepository) Show(ctx context.Context, id int64) (*lang_dto.Response, error) {
