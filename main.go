@@ -7,6 +7,7 @@ import (
 	"os"
 	"test/config"
 	"test/helper"
+	category_cmd "test/module/category"
 	language_cmd "test/module/language"
 
 	"github.com/julienschmidt/httprouter"
@@ -24,6 +25,7 @@ func main() {
 	router := httprouter.New()
 	{
 		language_cmd.Cmd(router, "/api", db)
+		category_cmd.Cmd(router, "/api", db)
 		// auth_cmd.Register(router, "/api", db)
 		// category_cmd.Register(router, "/api", db)
 		// hudud_cmd.Register(router, "/api", db)

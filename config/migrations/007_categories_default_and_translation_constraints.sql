@@ -1,0 +1,1 @@
+ALTER TABLE categories ADD COLUMN default_name VARCHAR(255);
