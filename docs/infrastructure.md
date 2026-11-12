@@ -1,50 +1,40 @@
-# PgBouncer va Redis
-
-PostgreSQL kompyuterga o'rnatilgan holda qoladi. `compose.yaml` faqat PgBouncer va Redisni ishga tushiradi:
+# Docker Compose: PostgreSQL, PgBouncer va Redis
 
 ```text
-Go -> 127.0.0.1:6432 -> PgBouncer -> host.docker.internal:5432 -> PostgreSQL
-Go -> 127.0.0.1:6380 -> Redis:6379
+Terminaldagi Go -> 127.0.0.1:6432 -> PgBouncer -> postgres:5432
+Terminaldagi Go -> 127.0.0.1:6380 -> Redis:6379
 ```
 
 ## Ishga tushirish
 
-Mavjud `.env`ni saqlang. Yangi o'rnatishda `.env.example`ni `.env`ga nusxalang va PostgreSQL paroli hamda tasodifiy Redis parolini kiriting. Parollarni logga yoki buyruq argumentlariga yozmang.
+Mavjud `.env` va `.env.example` o'zgartirilmaydi. Compose baza nomi, foydalanuvchi, parol, timezone va Redis parolini mavjud envdan oladi. Konteynerlar orasidagi host, port va lokal TLS sozlamalari `compose.yaml`da berilgan. Hostdagi PostgreSQL talab qilinmaydi; eski host bazasidagi ma'lumotlar avtomatik ko'chirilmaydi.
 
-```powershell
+```sh
 docker compose config --quiet
-docker compose up -d --wait
+docker compose up -d
 docker compose ps
-```
-
-Ikkala xizmat ham `healthy` holatga o'tishi kerak. Xizmatlar `restart: unless-stopped` bilan ishlaydi. Hostdagi portlar faqat `127.0.0.1`ga ochilgan. `6379` bu kompyuterda band bo'lgani uchun Redisning tashqi porti `6380` tanlangan.
-
-| Sozlama | Maqsad | Lokal qiymat |
-| --- | --- | --- |
-| `DB_HOST`, `DB_PORT` | Go -> PgBouncer | `127.0.0.1`, `6432` |
-| `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Mavjud PostgreSQL bazasi va hisob | Mavjud qiymatlar |
-| `DB_SSLMODE` | Go -> PgBouncer TLS | Lokal ulanishda `disable` |
-| `POSTGRES_HOST`, `POSTGRES_PORT` | PgBouncer -> PostgreSQL | `host.docker.internal`, `5432` |
-| `POSTGRES_SSLMODE` | PgBouncer -> PostgreSQL TLS | `prefer` |
-| `PGBOUNCER_PORT` | PgBouncerning host porti | `6432` |
-| `PGBOUNCER_ADMIN_USERS` | PgBouncer admin konsoliga kiruvchi foydalanuvchi | `postgres` |
-| `REDIS_HOST`, `REDIS_PORT` | Go -> Redis | `127.0.0.1`, `6380` |
-| `REDIS_PASSWORD` | Redis autentifikatsiyasi | Tasodifiy parol |
-| `REDIS_DB` | Redis bazasi | `0` |
-
-`PGBOUNCER_PORT`ni o'zgartirsangiz, `DB_PORT`ni ham moslang. PostgreSQL boshqa kompyuterda bo'lsa, `POSTGRES_HOST`ga o'sha kompyuter IP yoki DNS manzilini yozing. PostgreSQLning `listen_addresses`, `pg_hba.conf` va firewall sozlamalari konteynerdan kelgan ulanishga ruxsat berishi kerak. Konteynerdagi `localhost` host kompyuterini anglatmaydi.
-
-PgBouncer `transaction` rejimida ishlaydi: baza ulanishi tranzaksiya tugagach poolga qaytadi. `max_prepared_statements=200` pgxning protocol prepared statementlarini qo'llaydi. Ko'p buyruqli tranzaksiyalar uchun `statement` rejimini ishlatmang. [PgBouncer sozlamalari](https://www.pgbouncer.org/config).
-
-Go tomonidagi mavjud `pgxpool` saqlangan (`MaxConns=50`, `MinConns=10`). PgBouncerda odatiy pool `20`, zaxira `5`, bir baza uchun yuqori chegara `25`, mijozlar chegarasi `500`. Boshqa dasturlar va PgBouncer nusxalarining ulanishlari ham PostgreSQLning umumiy limitiga kiradi.
-
-Go dasturini yangi kod va `.env` bilan qayta ishga tushiring. `main.go` Redis ulanishini handlerlar yaratilishidan oldin bir marta tayyorlaydi. Mavjud ishga tushish mexanizmi bazaga ulanadi va migratsiyalarni tekshiradi.
-
-Tekshiruv uchun ishga tushirilgan Go fon serveri to'xtatilgan. PgBouncer va Redis Dockerda ishlashda davom etadi. Go serverni terminaldan ishga tushiring; uni `Ctrl+C` bilan to'xtating. `8082` portida bir vaqtning o'zida bitta server nusxasi ishlaydi:
-
-```powershell
+# PostgreSQL, PgBouncer va Redis healthy bo‘lgach:
 go run .
+# Boshqa terminalda:
+curl -f http://127.0.0.1:8082/api/languages-active
 ```
+
+Go loyiha terminalda ishlaydi. HTTP porti `.env`dagi `APP_PORT` qiymati (hozir `8082`). PostgreSQL tayyor bo'lgach PgBouncer ishga tushadi. `docker compose ps`da uchala xizmat `healthy` bo'lgach `go run .`ni bajaring. `go run .` bazaga PgBouncer orqali ulanadi va mavjud migratsiyalarni bajaradi. Go versiyasi haqiqiy `go.mod`ga mos `1.26` yoki undan yangi bo'lishi kerak.
+
+PostgreSQL ma'lumotlari `postgres_data` named volumeda saqlanadi. `docker compose down`dan keyin ham qoladi; `down -v` bu ma'lumotlarni o'chiradi. Baza paroli va foydalanuvchi dastlab bo'sh volume yaratilganda o'rnatiladi; keyingi env o'zgarishi mavjud bazaning parolini avtomatik almashtirmaydi. [PostgreSQL image hujjati](https://hub.docker.com/_/postgres).
+
+PostgreSQL hostga port ochmaydi. PgBouncer `127.0.0.1:${PGBOUNCER_PORT:-6432}`, Redis `127.0.0.1:${REDIS_PORT:-6380}` orqali ham mavjud. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_SSLMODE` ushbu Compose ichidagi PostgreSQL uchun ishlatilmaydi. Mavjud `.env`dagi `DB_HOST=127.0.0.1`, `DB_PORT=6432`, `DB_SSLMODE=disable`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6380` terminaldagi Go uchun mos. `DB_PORT` va `PGBOUNCER_PORT` bir xil bo‘lishi kerak.
+
+PgBouncer `transaction` rejimida ishlaydi. `max_prepared_statements=200` pgx protocol prepared statementlarini qo'llaydi; pool `20`, zaxira `5`, bir baza chegarasi `25`, mijoz chegarasi `500`. Go `pgxpool` sozlamalari o'zgarmagan. [Image entrypoint sozlamalari](https://github.com/edoburu/docker-pgbouncer/blob/v1.24.1-p1/entrypoint.sh).
+
+```sh
+docker compose logs --tail 50 postgres pgbouncer redis
+docker compose exec pgbouncer sh -c 'PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p 6432 -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1"'
+docker compose stop
+docker compose start --wait
+```
+
+Go kod o'zgargach terminaldagi serverni qayta ishga tushiring. `docker compose config`ni `--quiet`siz chiqarish parollarni ko'rsatishi mumkin.
 
 ## Faol tillar keshi
 
@@ -102,7 +92,9 @@ docker compose start --wait
 
 Parol yoki ulanish sozlamasi o'zgarsa, konteynerlarni `up -d --force-recreate` bilan qayta yarating va Go dasturini qayta ishga tushiring. `docker compose config`ni `--quiet`siz chiqarish parollarni ko'rsatishi mumkin.
 
-## Tekshiruv
+## Avvalgi konfiguratsiyadagi tekshiruvlar
+
+Quyidagi natijalar host PostgreSQL bilan avval bajarilgan; yangi Compose tekshiruvi sifatida qaralmaydi.
 
 2026-11-12 kuni ikkala konteyner `healthy` bo'ldi. Haqiqiy Redis bilan vaqtinchalik tekshiruvlarda keshning bo'sh natijasi, keshdan o'qish, create/update/delete orqali yangilash, nom/faollik o'zgarishi, muvaffaqiyatsiz yozuvda keshni saqlash, eskirgan parallel yozuvni rad etish va Redis mavjud bo'lmaganda bazaga qaytish o'tdi. CRUD tekshiruvlari xotiradagi izolyatsiyalangan repository bilan bajarildi; mavjud PostgreSQL yozuvlari o'zgartirilmadi.
 

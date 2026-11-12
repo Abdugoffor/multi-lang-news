@@ -1,16 +1,34 @@
 name: multi-lang-news
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: ${DB_TIMEZONE:-Asia/Tashkent}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   pgbouncer:
     image: edoburu/pgbouncer:v1.24.1-p1
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PGBOUNCER_PORT:-6432}:6432"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      DB_HOST: ${POSTGRES_HOST:-host.docker.internal}
-      DB_PORT: ${POSTGRES_PORT:-5432}
+      DB_HOST: postgres
+      DB_PORT: "5432"
       DB_NAME: ${DB_NAME:?DB_NAME is required}
       DB_USER: ${DB_USER:?DB_USER is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -23,7 +41,7 @@ services:
       RESERVE_POOL_SIZE: "5"
       MAX_DB_CONNECTIONS: "25"
       MAX_PREPARED_STATEMENTS: "200"
-      SERVER_TLS_SSLMODE: ${POSTGRES_SSLMODE:-prefer}
+      SERVER_TLS_SSLMODE: disable
     healthcheck:
       test: ["CMD-SHELL", "PGPASSWORD=\"$$DB_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U \"$$DB_USER\" -d \"$$DB_NAME\" -Atqc 'SELECT 1' >/dev/null"]
       interval: 10s
@@ -44,4 +62,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+volumes:
+  postgres_data:
 
