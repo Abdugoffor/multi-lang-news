@@ -43,7 +43,7 @@ Aktiv 5 tildan faqat 3 tasi yuborilsa, `400` javobidagi `missing_languages` qolg
 
 Bu javob Create va Update uchun bir xil. Barcha yetishmagan aktiv tillar bitta javobda, `ListActive`ning `id DESC` tartibida qaytariladi. Service'da nom `TrimSpace` qilingandan keyin bo'sh qolsa ham shu til ro'yxatga qo'shiladi. Xatoda kategoriya va tarjimalar bazaga yozilmaydi.
 
-PUT tarjimalar ro'yxatini to'liq almashtiradi: barcha aktiv tillardagi tarjimalar yuborilishi kerak; ro'yxatga kirmagan eski, endi aktiv bo'lmagan tillardagi tarjimalar o'chiriladi. `translations: []` faqat aktiv til qolmagan bo'lsa qabul qilinadi va barcha eski tarjimalarni olib tashlaydi. Default, kategoriya maydonlari va tarjimalar bitta tranzaksiyada saqlanadi; xatoda hech biri qisman yozilmaydi. Yozish davomida ishlatilgan til qatorlari `FOR SHARE` bilan himoyalanadi.
+PUT tarjimalar ro'yxatini to'liq almashtiradi: barcha aktiv tillardagi tarjimalar yuborilishi kerak; ro'yxatga kirmagan eski, endi aktiv bo'lmagan tillardagi tarjimalar o'chiriladi. `translations: []` faqat aktiv til qolmagan bo'lsa qabul qilinadi va barcha eski tarjimalarni olib tashlaydi. Default, kategoriya maydonlari va tarjimalar bitta tranzaksiyada saqlanadi; xatoda hech biri qisman yozilmaydi. Til aktivligi faqat service'da tekshiriladi; repository yuborilgan tarjimalarni `languages` jadvaliga qo'shilmasdan saqlaydi. Service tekshiruvi va yozish orasida til aktivligi parallel o'zgarishi mumkin.
 
 Show, Create va Update javobi:
 

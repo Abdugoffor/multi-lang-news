@@ -3,7 +3,6 @@ package category_repository
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	category_dto "test/module/category/dto"
@@ -11,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-var ErrLanguageUnavailable = errors.New("translation language is no longer active or available")
 
 type CategoryRepository interface {
 	List(ctx context.Context, filter *category_dto.Filter) ([]category_dto.ListItem, error)
@@ -210,21 +207,14 @@ func (repository *categoryRepository) Create(ctx context.Context, req *category_
 		return nil, err
 	}
 
-	result, err := tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO category_translations (category_id, language_id, name)
-		SELECT $1, l.id, t.name
+		SELECT $1, t.language_id, t.name
 		FROM jsonb_to_recordset(COALESCE(NULLIF($2::jsonb, 'null'::jsonb), '[]'::jsonb)) AS t(language_id INT, name TEXT)
-		JOIN languages l ON l.id = t.language_id
-		WHERE l.is_active = TRUE
-		ORDER BY l.id
-		FOR SHARE OF l
+		ORDER BY t.language_id
 	`, res.ID, translations)
 	if err != nil {
 		return nil, err
-	}
-
-	if result.RowsAffected() != int64(len(req.Translations)) {
-		return nil, ErrLanguageUnavailable
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -273,36 +263,24 @@ func (repository *categoryRepository) Update(ctx context.Context, id int64, req 
 		return nil, err
 	}
 
-	var saved int64
-
-	err = tx.QueryRow(ctx, `
-		WITH active_translations AS MATERIALIZED (
-			SELECT l.id AS language_id, t.name
+	_, err = tx.Exec(ctx, `
+		WITH requested_translations AS MATERIALIZED (
+			SELECT t.language_id, t.name
 			FROM jsonb_to_recordset(COALESCE(NULLIF($2::jsonb, 'null'::jsonb), '[]'::jsonb)) AS t(language_id INT, name TEXT)
-			JOIN languages l ON l.id = t.language_id
-			WHERE l.is_active = TRUE
-			ORDER BY l.id
-			FOR SHARE OF l
+			ORDER BY t.language_id
 		), updated AS (
 			UPDATE category_translations t
 			SET name = a.name, updated_at = CURRENT_TIMESTAMP
-			FROM active_translations a
+			FROM requested_translations a
 			WHERE t.category_id = $1 AND t.language_id = a.language_id
 			RETURNING t.language_id
-		), inserted AS (
-			INSERT INTO category_translations (category_id, language_id, name)
-			SELECT $1, a.language_id, a.name FROM active_translations a
-			WHERE NOT EXISTS (SELECT 1 FROM updated u WHERE u.language_id = a.language_id)
-			RETURNING language_id
 		)
-		SELECT (SELECT COUNT(*) FROM updated) + (SELECT COUNT(*) FROM inserted)
-	`, id, translations).Scan(&saved)
+		INSERT INTO category_translations (category_id, language_id, name)
+		SELECT $1, a.language_id, a.name FROM requested_translations a
+		WHERE NOT EXISTS (SELECT 1 FROM updated u WHERE u.language_id = a.language_id)
+	`, id, translations)
 	if err != nil {
 		return nil, err
-	}
-
-	if saved != int64(len(req.Translations)) {
-		return nil, ErrLanguageUnavailable
 	}
 
 	_, err = tx.Exec(ctx, `

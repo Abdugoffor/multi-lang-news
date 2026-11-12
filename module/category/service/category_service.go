@@ -218,7 +218,7 @@ func (service *CategoryService) Update(ctx context.Context, id int64, req *categ
 	missingLanguages := make([]category_dto.MissingLanguage, 0)
 
 	for _, language := range languages {
-		
+
 		name, exists := translations[language.ID]
 
 		if !exists || name == "" {
@@ -256,10 +256,6 @@ func (service *CategoryService) Delete(ctx context.Context, id int64) error {
 }
 
 func serviceError(err error) error {
-	if errors.Is(err, category_repository.ErrLanguageUnavailable) {
-		return ErrInvalidTranslation
-	}
-
 	var pgErr *pgconn.PgError
 
 	if errors.As(err, &pgErr) {
