@@ -12,6 +12,7 @@ import (
 	news_cmd "test/module/news"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/robfig/cron/v3"
 )
 
 func main() {
@@ -34,12 +35,28 @@ func main() {
 		// auth_cmd.Register(router, "/api", db)
 	}
 
+	scheduler := cron.New()
+	_, err := scheduler.AddFunc("@every 10s", sendEmail)
+	{
+		if err != nil {
+			log.Fatal("Cron schedule error: ", err)
+		}
+	}
+
+	scheduler.Start()
+
+	defer scheduler.Stop()
+
 	fmt.Printf("🚀 Server started on http://localhost:%s\n", helper.ENV("APP_PORT"))
 
 	if err := http.ListenAndServe(":"+helper.ENV("APP_PORT"), router); err != nil {
 
 		log.Fatal(err)
 	}
+}
+
+func sendEmail() {
+	fmt.Println("Email ga habar yuborildi")
 }
 
 func migrate() {
