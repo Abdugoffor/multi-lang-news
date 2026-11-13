@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 
+	"test/config"
 	"test/helper"
 	category_service "test/module/category/service"
 	lang_service "test/module/language/service"
@@ -15,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -36,6 +39,8 @@ func (err *MissingTranslationsError) Error() string {
 
 type NewsService struct {
 	repository news_repository.NewsRepository
+	cache      *redis.Client
+	newsKey    string
 	language   *lang_service.LangService
 	category   *category_service.CategoryService
 }
@@ -43,6 +48,8 @@ type NewsService struct {
 func NewNewsService(db *pgxpool.Pool) *NewsService {
 	return &NewsService{
 		repository: news_repository.NewNewsRepository(db),
+		cache:      config.Redis,
+		newsKey:    "test:" + helper.ENV("DB_NAME") + ":news:views:",
 		language:   lang_service.NewLangService(db),
 		category:   category_service.NewCategoryService(db),
 	}
@@ -135,6 +142,39 @@ func (service *NewsService) List(ctx context.Context, filter *news_dto.Filter) (
 
 func (service *NewsService) Show(ctx context.Context, id int64) (*news_dto.Response, error) {
 	return service.repository.Show(ctx, id)
+}
+
+func (service *NewsService) View(ctx context.Context, id int64) (*news_dto.Response, error) {
+	res, err := service.repository.Show(ctx, id)
+	{
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if service.cache == nil {
+		return nil, errors.New("news Redis is unavailable")
+	}
+
+	key := service.newsKey + strconv.FormatInt(id, 10)
+
+	// Kalit yo'q bo'lsa, hisobni bazadagi sondan boshlaymiz.
+	err = service.cache.SetNX(ctx, key, res.ViewCount, 0).Err()
+	{
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Redisdagi hisobni 1 ga oshiramiz va yangi sonni javobga qo'yamiz.
+	res.ViewCount, err = service.cache.Incr(ctx, key).Result()
+	{
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return res, nil
 }
 
 func (service *NewsService) Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error) {

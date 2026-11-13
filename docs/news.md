@@ -7,6 +7,7 @@
 | POST | `/api/news` | Yaratish, `201` |
 | GET | `/api/news` | Cursor pagination bilan ro'yxat, `200` |
 | GET | `/api/news/:id` | Yangilik va barcha tarjimalar, `200` |
+| GET | `/api/news/:id/view` | Yangilikni Redisdan olish va ko'rish sonini oshirish, `200` |
 | PUT | `/api/news/:id` | To'liq yangilash, `200` |
 | DELETE | `/api/news/:id` | Yangilik, tarjimalar va kategoriya bog'lanishlarini o'chirish, bodysiz `204` |
 
@@ -92,6 +93,10 @@ Show, Create va Update javobi:
 ```
 
 `category_ids` o'sish tartibida, tarjimalar `language_id ASC` tartibida qaytadi. Show saqlangan barcha tarjimalarni, keyin deaktivatsiya qilingan tillarni ham qaytaradi. Tarjima bo'lmasa `translations: []`. `view_count` bazada `0` bilan boshlanadi, body orqali o'zgartirilmaydi; List/Show uni avtomatik oshirmaydi. IDlar va vaqtlar ham server tomonidan belgilanadi.
+
+`GET /api/news/:id/view` alohida `View` handler va service metodiga ulangan. Yangilikning o'zi har safar mavjud repository `Show` orqali bazadan olinadi. Redisda faqat `test:<DB_NAME>:news:views:<id>` kaliti va uning qiymati sifatida ko'rishlar soni saqlanadi; yangilik JSONi yozilmaydi. `SetNX` kalit yo'q bo'lsa bazadagi `view_count`ni boshlang'ich son qilib saqlaydi, mavjud hisobni almashtirmaydi. Keyin `Incr` hisobni atomar `+1` qiladi. Javob formati Show bilan bir xil, `view_count` Redisdagi yangilangan son bo'ladi. Masalan, bazada `10` bo'lsa ketma-ket javoblar `11`, `12`, `13` qaytaradi. Lua ishlatilmaydi.
+
+View javobi `Cache-Control: no-store` bilan qaytadi. Bir odam qayta ochsa ham hisob oshadi. Yangilik bazada bo'lmasa `404` qaytadi va Redisdagi hisob oshirilmaydi; Redis xatosida umumiy `500` qaytadi. Hisobga TTL qo'yilmagan, u PostgreSQLga yozilmaydi. Redis kaliti o'chirilsa hisob yana bazadagi sondan boshlanadi. Avvalgi `test:<DB_NAME>:news:<id>` JSON saqlagan hash kalitlari yangi API tomonidan ishlatilmaydi.
 
 List misoli: `GET /api/news?language_id=1&category_id=2&is_active=true&limit=10`.
 

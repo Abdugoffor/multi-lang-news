@@ -29,6 +29,7 @@ func NewNewsHandler(router *httprouter.Router, group string, db *pgxpool.Pool) {
 	{
 		router.GET(routes, handler.List)
 		router.GET(routes+"/:id", handler.Show)
+		router.GET(routes+"/:id/view", handler.View)
 		router.POST(routes, handler.Create)
 		router.PUT(routes+"/:id", handler.Update)
 		router.DELETE(routes+"/:id", handler.Delete)
@@ -164,6 +165,27 @@ func (handler *newsHandler) Show(w http.ResponseWriter, r *http.Request, params 
 	}
 
 	res, err := handler.service.Show(r.Context(), id)
+	{
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	}
+
+	helper.JSON(w, http.StatusOK, res)
+}
+
+func (handler *newsHandler) View(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	id, ok := helper.ParseID(w, params)
+	{
+		if !ok {
+			return
+		}
+	}
+
+	res, err := handler.service.View(r.Context(), id)
 	{
 		if err != nil {
 			writeServiceError(w, err)
