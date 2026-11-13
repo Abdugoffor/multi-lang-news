@@ -35,15 +35,7 @@ func main() {
 		// auth_cmd.Register(router, "/api", db)
 	}
 
-	scheduler := cron.New()
-	_, err := scheduler.AddFunc("@every 10s", sendEmail)
-	{
-		if err != nil {
-			log.Fatal("Cron schedule error: ", err)
-		}
-	}
-
-	scheduler.Start()
+	scheduler := command()
 
 	defer scheduler.Stop()
 
@@ -53,6 +45,31 @@ func main() {
 
 		log.Fatal(err)
 	}
+}
+
+func command() *cron.Cron {
+	scheduler := cron.New()
+
+	// 10 soniyada bir marta sendEmail funksiyasini ishga tushiradi
+	_, err := scheduler.AddFunc("@every 10s", sendEmail)
+	{
+		if err != nil {
+			log.Fatal("Cron schedule error: ", err)
+		}
+	}
+
+	_, err = scheduler.AddFunc("@every 20s", func() {
+		fmt.Println("20 soniyada bir marta ishga tushadi")
+	})
+	{
+		if err != nil {
+			log.Fatal("Cron schedule error: ", err)
+		}
+	}
+
+	scheduler.Start()
+
+	return scheduler
 }
 
 func sendEmail() {
