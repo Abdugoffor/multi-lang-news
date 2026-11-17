@@ -25,6 +25,11 @@ type Create struct {
 
 type Update Create
 
+type ViewCountUpdate struct {
+	ID        int64
+	ViewCount int64
+}
+
 type Filter struct {
 	LanguageID int64
 	CategoryID int64

@@ -2,19 +2,21 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
+
 	"test/config"
 	"test/helper"
 	category_cmd "test/module/category"
 	language_cmd "test/module/language"
 	news_cmd "test/module/news"
+	news_service "test/module/news/service"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/julienschmidt/httprouter"
-	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
 
@@ -38,7 +40,7 @@ func main() {
 		// auth_cmd.Register(router, "/api", db)
 	}
 
-	scheduler := command()
+	scheduler := command(db)
 
 	defer scheduler.Stop()
 
@@ -50,25 +52,21 @@ func main() {
 	}
 }
 
-func command() *cron.Cron {
-	scheduler := cron.New()
+func command(db *pgxpool.Pool) *cron.Cron {
+	scheduler := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)))
+	service := news_service.NewNewsService(db)
 
-	ctx := context.Background()
+	_, err := scheduler.AddFunc("@every 3m", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
 
-	_, err := scheduler.AddFunc("@every 5s", func() {
-		values, err := GetNewsViews(ctx)
+		err := service.SyncViews(ctx)
 		{
 			if err != nil {
-				log.Println("Redis news views error:", err)
+				log.Println("Sync news views error:", err)
 				return
 			}
 		}
-
-		fmt.Println(values)
-
-		// for key, value := range values {
-		// 	fmt.Printf("%s = %s\n", key, value)
-		// }
 	})
 	{
 		if err != nil {
@@ -123,42 +121,4 @@ func migrate() {
 			os.Exit(0)
 		}
 	}
-}
-
-func GetNewsViews(ctx context.Context) (map[string]string, error) {
-
-	// 1. Redis kalitlarini qidirish patterni
-	pattern := "test:" + helper.ENV("DB_NAME") + ":news:views:*"
-
-	// 2. Natijalar saqlanadigan map
-	values := make(map[string]string)
-
-	// 3. Redis kalitlarini qidirish
-	iter := config.Redis.Scan(ctx, 0, pattern, 100).Iterator()
-
-	// 4. Topilgan kalitlarni o'qish
-	for iter.Next(ctx) {
-		key := iter.Val()
-
-		// 5. Kalitning qiymatini olish
-		value, err := config.Redis.Get(ctx, key).Result()
-
-		if errors.Is(err, redis.Nil) {
-			continue // Kalit SCAN va GET orasida o'chgan
-		}
-
-		if err != nil {
-			return nil, err
-		}
-
-		// 6. Map ichiga yozish
-		values[key] = value
-	}
-
-	// 7. SCAN xatosini tekshirish
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
-
-	return values, nil
 }

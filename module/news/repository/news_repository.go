@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"test/config"
@@ -22,23 +23,27 @@ type NewsRepository interface {
 	List(ctx context.Context, filter *news_dto.Filter) ([]news_dto.ListItem, error)
 	HasMore(ctx context.Context, filter *news_dto.Filter, cursor int64, direction string) (bool, error)
 	Show(ctx context.Context, id int64) (*news_dto.Response, error)
-	InvalidateShow(ctx context.Context, id int64) error
+	InvalidateShow(ctx context.Context, ids ...int64) error
+	GetNewsViews(ctx context.Context) (map[int64]int64, error)
+	UpdateViewCounts(ctx context.Context, updates []news_dto.ViewCountUpdate) error
 	Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error)
 	Update(ctx context.Context, id int64, req *news_dto.Update) (*news_dto.Response, error)
 	Delete(ctx context.Context, id int64) error
 }
 
 type newsRepository struct {
-	db      *pgxpool.Pool
-	cache   *redis.Client
-	showKey string
+	db       *pgxpool.Pool
+	cache    *redis.Client
+	showKey  string
+	viewsKey string
 }
 
 func NewNewsRepository(db *pgxpool.Pool) NewsRepository {
 	return &newsRepository{
-		db:      db,
-		cache:   config.Redis,
-		showKey: "test:" + helper.ENV("DB_NAME") + ":{news}:show:",
+		db:       db,
+		cache:    config.Redis,
+		showKey:  "test:" + helper.ENV("DB_NAME") + ":{news}:show:",
+		viewsKey: "test:" + helper.ENV("DB_NAME") + ":news:views:",
 	}
 }
 
@@ -282,14 +287,92 @@ func (repository *newsRepository) Show(ctx context.Context, id int64) (*news_dto
 	return &res, nil
 }
 
-func (repository *newsRepository) InvalidateShow(ctx context.Context, id int64) error {
-	if repository.cache == nil {
+func (repository *newsRepository) InvalidateShow(ctx context.Context, ids ...int64) error {
+	if repository.cache == nil || len(ids) == 0 {
 		return nil
 	}
 
-	key := repository.showKey + strconv.FormatInt(id, 10)
+	keys := make([]string, 0, len(ids))
 
-	return repository.cache.Del(ctx, key).Err()
+	for _, id := range ids {
+		keys = append(keys, repository.showKey+strconv.FormatInt(id, 10))
+	}
+
+	return repository.cache.Del(ctx, keys...).Err()
+}
+
+func (repository *newsRepository) GetNewsViews(ctx context.Context) (map[int64]int64, error) {
+	if repository.cache == nil {
+		return nil, errors.New("news Redis is unavailable")
+	}
+
+	values := make(map[int64]int64)
+	iter := repository.cache.Scan(ctx, 0, repository.viewsKey+"*", 100).Iterator()
+
+	for iter.Next(ctx) {
+		key := iter.Val()
+		id, err := strconv.ParseInt(strings.TrimPrefix(key, repository.viewsKey), 10, 64)
+		{
+			if err != nil || id < 1 {
+				continue
+			}
+		}
+
+		value, err := repository.cache.Get(ctx, key).Result()
+		{
+			if errors.Is(err, redis.Nil) {
+				continue
+			}
+
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		count, err := strconv.ParseInt(value, 10, 64)
+		{
+			if err != nil {
+				log.Printf("Read news %d views: %v", id, err)
+				continue
+			}
+		}
+
+		values[id] = count
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+
+	return values, nil
+}
+
+func (repository *newsRepository) UpdateViewCounts(ctx context.Context, updates []news_dto.ViewCountUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	ids := make([]int64, 0, len(updates))
+	counts := make([]int64, 0, len(updates))
+
+	for _, update := range updates {
+		ids = append(ids, update.ID)
+		counts = append(counts, update.ViewCount)
+	}
+
+	_, err := repository.db.Exec(ctx, `
+		UPDATE news AS n
+		SET view_count = GREATEST(n.view_count, v.view_count)
+		FROM unnest($1::BIGINT[], $2::BIGINT[]) AS v(id, view_count)
+		WHERE n.id = v.id
+	`, ids, counts)
+	{
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (repository *newsRepository) Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error) {

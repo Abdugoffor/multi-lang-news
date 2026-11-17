@@ -3,6 +3,7 @@ package news_service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"strconv"
@@ -179,6 +180,59 @@ func (service *NewsService) View(ctx context.Context, id int64) (*news_dto.Respo
 	return res, nil
 }
 
+func (service *NewsService) SyncViews(ctx context.Context) error {
+	values, err := service.repository.GetNewsViews(ctx)
+	{
+		if err != nil {
+			return err
+		}
+	}
+
+	var syncError error
+	updates := make([]news_dto.ViewCountUpdate, 0, len(values))
+
+	for id, count := range values {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(syncError, err)
+		}
+
+		if count < 0 {
+			syncError = errors.Join(syncError, fmt.Errorf("news %d has a negative view count", id))
+			continue
+		}
+
+		updates = append(updates, news_dto.ViewCountUpdate{ID: id, ViewCount: count})
+	}
+
+	const batchSize = 500
+
+	for start := 0; start < len(updates); start += batchSize {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(syncError, err)
+		}
+
+		batch := updates[start:min(start+batchSize, len(updates))]
+
+		err := service.repository.UpdateViewCounts(ctx, batch)
+		{
+			if err != nil {
+				syncError = errors.Join(syncError, fmt.Errorf("update news views batch %d: %w", start/batchSize+1, err))
+				continue
+			}
+		}
+
+		ids := make([]int64, 0, len(batch))
+
+		for _, update := range batch {
+			ids = append(ids, update.ID)
+		}
+
+		service.invalidateShow(ctx, ids...)
+	}
+
+	return syncError
+}
+
 func (service *NewsService) Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error) {
 	if err := service.prepare(ctx, req); err != nil {
 		return nil, err
@@ -224,14 +278,14 @@ func (service *NewsService) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (service *NewsService) invalidateShow(ctx context.Context, id int64) {
+func (service *NewsService) invalidateShow(ctx context.Context, ids ...int64) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 
-	err := service.repository.InvalidateShow(ctx, id)
+	err := service.repository.InvalidateShow(ctx, ids...)
 	{
 		if err != nil {
-			log.Printf("Invalidate news %d cache: %v", id, err)
+			log.Printf("Invalidate news %v cache: %v", ids, err)
 		}
 	}
 }
