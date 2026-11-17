@@ -3,29 +3,43 @@ package news_repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
+	"strconv"
+	"time"
 
+	"test/config"
+	"test/helper"
 	news_dto "test/module/news/dto"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type NewsRepository interface {
 	List(ctx context.Context, filter *news_dto.Filter) ([]news_dto.ListItem, error)
 	HasMore(ctx context.Context, filter *news_dto.Filter, cursor int64, direction string) (bool, error)
 	Show(ctx context.Context, id int64) (*news_dto.Response, error)
+	InvalidateShow(ctx context.Context, id int64) error
 	Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error)
 	Update(ctx context.Context, id int64, req *news_dto.Update) (*news_dto.Response, error)
 	Delete(ctx context.Context, id int64) error
 }
 
 type newsRepository struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	cache   *redis.Client
+	showKey string
 }
 
 func NewNewsRepository(db *pgxpool.Pool) NewsRepository {
-	return &newsRepository{db: db}
+	return &newsRepository{
+		db:      db,
+		cache:   config.Redis,
+		showKey: "test:" + helper.ENV("DB_NAME") + ":{news}:show:",
+	}
 }
 
 func (repository *newsRepository) List(ctx context.Context, filter *news_dto.Filter) ([]news_dto.ListItem, error) {
@@ -192,6 +206,33 @@ func (repository *newsRepository) HasMore(ctx context.Context, filter *news_dto.
 }
 
 func (repository *newsRepository) Show(ctx context.Context, id int64) (*news_dto.Response, error) {
+	key := repository.showKey + strconv.FormatInt(id, 10)
+	cacheAvailable := false
+
+	if repository.cache != nil {
+		data, err := repository.cache.Get(ctx, key).Bytes()
+		{
+			if err == nil {
+				cacheAvailable = true
+
+				var cached news_dto.Response
+				{
+					if err := json.Unmarshal(data, &cached); err != nil {
+						log.Printf("Decode news %d cache: %v", id, err)
+					} else if cached.ID == id {
+						return &cached, nil
+					} else {
+						log.Printf("Decode news %d cache: unexpected news ID %d", id, cached.ID)
+					}
+				}
+			} else if errors.Is(err, redis.Nil) {
+				cacheAvailable = true
+			} else {
+				log.Printf("Read news %d cache: %v", id, err)
+			}
+		}
+	}
+
 	var res news_dto.Response
 
 	err := repository.db.QueryRow(ctx, `
@@ -221,7 +262,34 @@ func (repository *newsRepository) Show(ctx context.Context, id int64) (*news_dto
 		return nil, err
 	}
 
+	if cacheAvailable {
+		data, err := json.Marshal(&res)
+		{
+			if err != nil {
+				log.Printf("Encode news %d cache: %v", id, err)
+				return &res, nil
+			}
+		}
+
+		err = repository.cache.Set(ctx, key, data, 3*time.Minute).Err()
+		{
+			if err != nil {
+				log.Printf("Store news %d cache: %v", id, err)
+			}
+		}
+	}
+
 	return &res, nil
+}
+
+func (repository *newsRepository) InvalidateShow(ctx context.Context, id int64) error {
+	if repository.cache == nil {
+		return nil
+	}
+
+	key := repository.showKey + strconv.FormatInt(id, 10)
+
+	return repository.cache.Del(ctx, key).Err()
 }
 
 func (repository *newsRepository) Create(ctx context.Context, req *news_dto.Create) (*news_dto.Response, error) {

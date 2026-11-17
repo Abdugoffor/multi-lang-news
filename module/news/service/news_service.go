@@ -3,9 +3,11 @@ package news_service
 import (
 	"context"
 	"errors"
+	"log"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"test/config"
 	"test/helper"
@@ -204,11 +206,34 @@ func (service *NewsService) Update(ctx context.Context, id int64, req *news_dto.
 		}
 	}
 
+	service.invalidateShow(ctx, id)
+
 	return res, nil
 }
 
 func (service *NewsService) Delete(ctx context.Context, id int64) error {
-	return serviceError(service.repository.Delete(ctx, id))
+	err := service.repository.Delete(ctx, id)
+	{
+		if err != nil {
+			return serviceError(err)
+		}
+	}
+
+	service.invalidateShow(ctx, id)
+
+	return nil
+}
+
+func (service *NewsService) invalidateShow(ctx context.Context, id int64) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+
+	err := service.repository.InvalidateShow(ctx, id)
+	{
+		if err != nil {
+			log.Printf("Invalidate news %d cache: %v", id, err)
+		}
+	}
 }
 
 func (service *NewsService) prepare(ctx context.Context, req *news_dto.Create) error {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	news_cmd "test/module/news"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
 
@@ -50,16 +53,22 @@ func main() {
 func command() *cron.Cron {
 	scheduler := cron.New()
 
-	// 10 soniyada bir marta sendEmail funksiyasini ishga tushiradi
-	_, err := scheduler.AddFunc("@every 10s", sendEmail)
-	{
-		if err != nil {
-			log.Fatal("Cron schedule error: ", err)
-		}
-	}
+	ctx := context.Background()
 
-	_, err = scheduler.AddFunc("@every 20s", func() {
-		fmt.Println("20 soniyada bir marta ishga tushadi")
+	_, err := scheduler.AddFunc("@every 5s", func() {
+		values, err := GetNewsViews(ctx)
+		{
+			if err != nil {
+				log.Println("Redis news views error:", err)
+				return
+			}
+		}
+
+		fmt.Println(values)
+
+		// for key, value := range values {
+		// 	fmt.Printf("%s = %s\n", key, value)
+		// }
 	})
 	{
 		if err != nil {
@@ -70,6 +79,24 @@ func command() *cron.Cron {
 	scheduler.Start()
 
 	return scheduler
+
+	// 10 soniyada bir marta sendEmail funksiyasini ishga tushiradi
+	// _, err := scheduler.AddFunc("@every 10s", sendEmail)
+	// {
+	// 	if err != nil {
+	// 		log.Fatal("Cron schedule error: ", err)
+	// 	}
+	// }
+
+	// _, err = scheduler.AddFunc("@every 20s", func() {
+	// 	fmt.Println("20 soniyada bir marta ishga tushadi")
+	// })
+	// {
+	// 	if err != nil {
+	// 		log.Fatal("Cron schedule error: ", err)
+	// 	}
+	// }
+
 }
 
 func sendEmail() {
@@ -96,4 +123,42 @@ func migrate() {
 			os.Exit(0)
 		}
 	}
+}
+
+func GetNewsViews(ctx context.Context) (map[string]string, error) {
+
+	// 1. Redis kalitlarini qidirish patterni
+	pattern := "test:" + helper.ENV("DB_NAME") + ":news:views:*"
+
+	// 2. Natijalar saqlanadigan map
+	values := make(map[string]string)
+
+	// 3. Redis kalitlarini qidirish
+	iter := config.Redis.Scan(ctx, 0, pattern, 100).Iterator()
+
+	// 4. Topilgan kalitlarni o'qish
+	for iter.Next(ctx) {
+		key := iter.Val()
+
+		// 5. Kalitning qiymatini olish
+		value, err := config.Redis.Get(ctx, key).Result()
+
+		if errors.Is(err, redis.Nil) {
+			continue // Kalit SCAN va GET orasida o'chgan
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		// 6. Map ichiga yozish
+		values[key] = value
+	}
+
+	// 7. SCAN xatosini tekshirish
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+
+	return values, nil
 }
